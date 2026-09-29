@@ -77,7 +77,7 @@ set `idleMinutes` to force a delay.
 2. Add this repo as a marketplace and install the plugin:
 
    ```
-   /plugin marketplace add <this repo's URL or a local clone's path>
+   /plugin marketplace add davidar/claude-idle-compact
    /plugin install idle-compact@idle-compact
    ```
 

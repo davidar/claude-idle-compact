@@ -3,6 +3,8 @@
   "version": "0.2.0",
   "description": "Compacts an idle interactive session shortly before its prompt cache expires, so coming back later doesn't re-read the whole context uncached.",
   "author": { "name": "David Roberts" },
+  "homepage": "https://github.com/davidar/claude-idle-compact",
+  "repository": "https://github.com/davidar/claude-idle-compact",
   "license": "MIT",
   "keywords": ["compact", "prompt-cache", "idle", "mod"],
   "userConfig": {

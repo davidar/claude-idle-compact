@@ -1,0 +1,14 @@
+{
+  "name": "idle-compact",
+  "description": "idle-compact, a Claude Code mod that compacts an idle session before its prompt cache expires.",
+  "owner": {
+    "name": "David Roberts"
+  },
+  "plugins": [
+    {
+      "name": "idle-compact",
+      "source": "./",
+      "description": "Compacts an idle interactive session shortly before its prompt cache expires."
+    }
+  ]
+}

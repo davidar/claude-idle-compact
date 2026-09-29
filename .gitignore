@@ -1,0 +1,7 @@
+# Written by Claude Code when it loads the mod (also self-ignored)
+.claude-plugin/types/
+node_modules/
+
+# Internal dev notes and agent instructions
+NOTES.md
+.claude/

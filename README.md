@@ -5,7 +5,7 @@ cache expires. You come back to a small, warm context instead of a big, cold one
 
 > **Early access.** This uses Claude Code's mods API (function hooks), which is behind
 > `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and "may change between releases without notice". Written and
-> tested against Claude Code 2.1.284.
+> tested against Claude Code 2.1.286.
 
 ## Why
 
@@ -105,9 +105,9 @@ Two environment variables override both options. They're mainly for testing:
 - **Compaction is lossy.** You come back to a summary, not the full transcript. If you'd rather pay
   for a cold re-read than lose detail, raise `minTokens` or disable the plugin for that session.
 - **The transcript records it as a manual compaction.** It goes through the same path as `/compact`,
-  so the transcript JSONL marks it with `trigger: "manual"`. Find it by timestamp. The
-  "compacted at …" line is drawn in the terminal but isn't written to the JSONL, so it doesn't survive
-  `--resume`.
+  so the transcript JSONL marks it with `trigger: "manual"`. To find one afterwards, look for the
+  "compacted at …" line, which is written to the transcript and shown again after `--resume`
+  (as of 2.1.286).
 - **The automatic TTL is inferred.** A mod can't read the TTL Claude Code actually chose, so
   idle-compact repeats Claude Code's own resolution. It detects a subscription by the plan windows
   (`five_hour` / `seven_day`) in the session's rate limits. If Claude Code changes how it picks the

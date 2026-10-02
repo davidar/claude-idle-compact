@@ -5,6 +5,8 @@
   "author": { "name": "David Roberts" },
   "homepage": "https://github.com/davidar/claude-idle-compact",
   "repository": "https://github.com/davidar/claude-idle-compact",
+  "documentationUrl": "https://github.com/davidar/claude-idle-compact#readme",
+  "supportUrl": "https://github.com/davidar/claude-idle-compact/issues",
   "license": "MIT",
   "keywords": ["compact", "prompt-cache", "idle", "mod"],
   "userConfig": {

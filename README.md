@@ -43,7 +43,9 @@ that the conversation is now a summary: see [Caveats](#caveats).
   ```
 
   The status line goes away when the next turn starts.
-- It compacts once. The compaction itself isn't a turn, so nothing re-arms the timer until you're back.
+- It compacts once per idle stretch. The compaction itself isn't a turn, so nothing re-arms the timer
+  until the next turn. A background agent reporting back counts as a turn, so a session can compact
+  again after one, if the context has grown past the floor by then.
 
 ### What the hook does
 
@@ -129,7 +131,11 @@ it loads the mod from this folder, stamped with its version. The root `tsconfig.
 `tsconfig.json` in there. On a fresh clone, run the mod once, for example
 `claude --plugin-dir . -p ok`, before type-checking.
 
-For a live check, use a throwaway session with a one-minute delay. A copy loaded with `--plugin-dir`
+`tests/live.sh` checks what the mocked tests can't: it runs throwaway Haiku sessions in tmux with a
+one-minute delay and watches for the compaction after a plain turn, after a slash command, and with
+a background agent running. It takes about four minutes.
+
+To poke at it by hand, use a throwaway session with a one-minute delay. A copy loaded with `--plugin-dir`
 replaces the installed one for that session, and takes its options from `idle-compact@inline`:
 
 ```sh

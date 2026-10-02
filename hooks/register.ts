@@ -13,7 +13,7 @@ function nonNegative(raw: unknown): number | undefined {
 }
 
 const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5)
-const kTokens = (n: number) => `${Math.round(n / 1000)}k`
+const inThousands = (n: number) => `${Math.round(n / 1000)}k`
 
 /** Idle time before compacting. It assumes the 1-hour cache: the mod is no use on a 5-minute one. */
 function idleDelayMs(options: PluginOptions) {
@@ -60,8 +60,8 @@ async function compactIfWorthIt($: EngineInterface, state: State, idleSince: num
     const idleMin = Math.round((now - idleSince) / 60_000)
     const result = await $.session.compact({ instructions: instructions(at, idleMin) })
     if (result.messages === undefined) return
-    const after = result.tokensAfter === undefined ? '' : ` → ${kTokens(result.tokensAfter)}`
-    const line = `compacted at ${at} after ${idleMin} min idle (${kTokens(result.tokensBefore ?? before)}${after} tokens)`
+    const after = result.tokensAfter === undefined ? '' : ` → ${inThousands(result.tokensAfter)}`
+    const line = `compacted at ${at} after ${idleMin} min idle (${inThousands(result.tokensBefore ?? before)}${after} tokens)`
     $.ui.log(line)
     // A prompt sent while the summary ran has already cleared the status; don't pin a stale one.
     if (fired !== state.generation) return

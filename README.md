@@ -3,9 +3,8 @@
 A [Claude Code](https://code.claude.com) mod that compacts an idle session shortly before its prompt
 cache expires. You come back to a small, warm context instead of a big, cold one.
 
-> **Early access.** This uses Claude Code's mods API (function hooks), which is behind
-> `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and "may change between releases without notice". Written and
-> tested against Claude Code 2.1.286.
+Needs Claude Code 2.1.287 or later, the first release with
+[mods](https://code.claude.com/docs/en/plugins/mods/overview) on by default.
 
 ## Why
 
@@ -66,23 +65,17 @@ set `idleMinutes` to force a delay.
 
 ## Install
 
-1. Turn on mods. Add this to `~/.claude/settings.json`:
+Add this repo as a marketplace and install the plugin:
 
-   ```json
-   { "env": { "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1" } }
-   ```
+```
+/plugin marketplace add davidar/claude-idle-compact
+/plugin install idle-compact@idle-compact
+```
 
-   You can also export `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in your shell rc.
+To try it without installing, run `claude --plugin-dir /path/to/claude-idle-compact`.
 
-2. Add this repo as a marketplace and install the plugin:
-
-   ```
-   /plugin marketplace add davidar/claude-idle-compact
-   /plugin install idle-compact@idle-compact
-   ```
-
-   To try it without installing, run
-   `claude --plugin-dir /path/to/claude-idle-compact`.
+If you set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` during the mods early access, you can remove it.
+Claude Code ignores it now.
 
 ## Configure
 
@@ -106,33 +99,31 @@ Two environment variables override both options. They're mainly for testing:
   for a cold re-read than lose detail, raise `minTokens` or disable the plugin for that session.
 - **The transcript records it as a manual compaction.** It goes through the same path as `/compact`,
   so the transcript JSONL marks it with `trigger: "manual"`. To find one afterwards, look for the
-  "compacted at …" line, which is written to the transcript and shown again after `--resume`
-  (as of 2.1.286).
+  "compacted at …" line, which is written to the transcript and shown again after `--resume`.
 - **The automatic TTL is inferred.** A mod can't read the TTL Claude Code actually chose, so
   idle-compact repeats Claude Code's own resolution. It detects a subscription by the plan windows
   (`five_hour` / `seven_day`) in the session's rate limits. If Claude Code changes how it picks the
   TTL, set `idleMinutes` or `promptCacheTtl` explicitly.
-- **Early-access API.** The mods API may change under it. `claude plugin validate .` shows what the
-  module hooks, calls and reads.
+- **A mod runs with your permissions.** `claude plugin validate .` on a clone shows what the module
+  hooks, calls and reads, without running it.
 
 ## Develop
 
 ```sh
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test .   # tests (mocked clock, env, usage)
-claude plugin validate .claude-plugin/plugin.json           # what the module hooks, calls and reads
-npx -p typescript tsc -p .                                  # type-check
+claude plugin test .                               # tests (mocked clock, env, usage)
+claude plugin validate .claude-plugin/plugin.json  # what the module hooks, calls and reads
+npx -p typescript tsc -p .                         # type-check
 ```
 
 The types come from Claude Code itself. It writes `.claude-plugin/types/` (gitignored) the first time
 it loads the mod from this folder, stamped with its version. The root `tsconfig.json` extends the
 `tsconfig.json` in there. On a fresh clone, run the mod once, for example
-`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir . -p ok`, before type-checking.
+`claude --plugin-dir . -p ok`, before type-checking.
 
 For a live check, use a throwaway session:
 
 ```sh
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 IDLE_COMPACT_MS=60000 IDLE_COMPACT_MIN_TOKENS=1000 \
-  claude --plugin-dir . --model haiku
+IDLE_COMPACT_MS=60000 IDLE_COMPACT_MIN_TOKENS=1000 claude --plugin-dir . --model haiku
 ```
 
 ## Related

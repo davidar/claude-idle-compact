@@ -7,15 +7,13 @@ const MIN = 60_000
 const SUMMARY = { role: 'user' as const, text: 'summary', toolUses: [] }
 
 type Setup = {
-  env?: Record<string, string>
   tokens?: number
   compact?: 'ok' | 'skip' | 'throw'
 }
 
 /** Answers everything the module reads beneath it, and records what it does. */
-function setup(on: On, { env = {}, tokens = 200_000, compact = 'ok' }: Setup = {}) {
+function setup(on: On, { tokens = 200_000, compact = 'ok' }: Setup = {}) {
   const clock = mock.clock(on, { now: Date.parse('2026-09-29T18:00:00') })
-  mock.env(on, env)
   const seen = { compacts: [] as string[], logs: [] as string[], status: [] as (string | undefined)[] }
   on('session.usage', () => ({
     value: { startedAt: 0, context: { tokens, window: 1_000_000, percent: 20 }, rateLimits: [] },
@@ -50,16 +48,6 @@ describe('timing', () => {
     expect(seen.compacts[0]).toContain('at 18:50, after 50 minutes idle')
   })
 
-  test('IDLE_COMPACT_MS overrides the delay', async ($, on) => {
-    const { clock, seen } = setup(on, { env: { IDLE_COMPACT_MS: '1000' } })
-    await turnDone($)
-    await clock.advance(999)
-    expect(seen.compacts).toEqual([])
-    await clock.advance(2)
-    await clock.settle()
-    expect(seen.compacts.length).toBe(1)
-  })
-
   test('idleMinutes 0 means the default 50 minutes', { options: { idleMinutes: 0 } }, async ($, on) => {
     const { clock, seen } = setup(on)
     await turnDone($)
@@ -71,7 +59,9 @@ describe('timing', () => {
   test('the idleMinutes option overrides the delay', { options: { idleMinutes: 5 } }, async ($, on) => {
     const { clock, seen } = setup(on)
     await turnDone($)
-    await clock.advance(5 * MIN + 1)
+    await clock.advance(5 * MIN - 1)
+    expect(seen.compacts).toEqual([])
+    await clock.advance(2)
     await clock.settle()
     expect(seen.compacts.length).toBe(1)
   })

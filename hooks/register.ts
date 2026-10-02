@@ -16,15 +16,13 @@ const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5)
 const kTokens = (n: number) => `${Math.round(n / 1000)}k`
 
 /** Idle time before compacting. It assumes the 1-hour cache: the mod is no use on a 5-minute one. */
-async function idleDelayMs($: EngineInterface, options: PluginOptions) {
-  const envMs = nonNegative(await $.env.get('IDLE_COMPACT_MS'))
-  if (envMs) return envMs
+function idleDelayMs(options: PluginOptions) {
   const minutes = nonNegative(options.idleMinutes)
   return minutes ? minutes * 60_000 : HOUR_MS - MARGIN_MS
 }
 
-async function minTokens($: EngineInterface, options: PluginOptions) {
-  return nonNegative(await $.env.get('IDLE_COMPACT_MIN_TOKENS')) ?? nonNegative(options.minTokens) ?? DEFAULT_MIN_TOKENS
+function minTokens(options: PluginOptions) {
+  return nonNegative(options.minTokens) ?? DEFAULT_MIN_TOKENS
 }
 
 const instructions = (at: string, idleMin: number) =>
@@ -77,8 +75,8 @@ async function compactIfWorthIt($: EngineInterface, state: State, idleSince: num
 async function arm($: EngineInterface, state: State, options: PluginOptions) {
   disarm(state)
   const armed = state.generation
-  const delay = await idleDelayMs($, options)
-  const floor = await minTokens($, options)
+  const delay = idleDelayMs(options)
+  const floor = minTokens(options)
   const idleSince = await $.clock.now()
   if (armed !== state.generation) return
   state.timer = $.clock.after(delay, () => {

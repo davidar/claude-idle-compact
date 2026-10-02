@@ -58,12 +58,15 @@ skills, commands, agents or MCP servers. It handles four events:
 
 It lets every event continue unchanged. It never rewrites a prompt, a tool call or a turn.
 
-It reads three things: the session's context size (`$.session.usage`), and the two environment
-variables `IDLE_COMPACT_MS` and `IDLE_COMPACT_MIN_TOKENS`. It reads no settings, and no API key,
-token or other credential.
+In prose: the hook starts a timer when a turn of the main conversation completes, and cancels it
+when you submit a prompt, when a turn starts, or when the session ends. If the timer runs out, the
+hook compacts the conversation.
+
+The only thing it reads is the session's context size (`$.session.usage`). It reads no environment
+variables, settings or files.
 
 When the timer fires it calls `$.session.compact`, which makes the same model request `/compact`
-makes, on your plan or API key. That is the only thing it sends anywhere. It makes no network
+makes, on your own account. That is the only thing it sends anywhere. It makes no network
 requests of its own, starts no processes, and reads and writes no files. It writes one line to the
 transcript (`$.ui.log`) and one to the status line (`$.ui.status`).
 
@@ -100,13 +103,6 @@ Set these with `/plugin configure idle-compact@idle-compact`, or in `/config`:
 | `idleMinutes` | `50` | Minutes idle before compacting. |
 | `minTokens` | `60000` | Leave contexts smaller than this alone. |
 
-Two environment variables override both options. They're mainly for testing:
-
-| Variable | Meaning |
-|---|---|
-| `IDLE_COMPACT_MS` | Idle delay in milliseconds, e.g. `60000` for a one-minute check. |
-| `IDLE_COMPACT_MIN_TOKENS` | Minimum context size. |
-
 ## Caveats
 
 - **Compaction is lossy.** You come back to a summary, not the full transcript. If you'd rather pay
@@ -123,7 +119,7 @@ Two environment variables override both options. They're mainly for testing:
 ## Develop
 
 ```sh
-claude plugin test .                               # tests (mocked clock, env, usage)
+claude plugin test .                               # tests (mocked clock and usage)
 claude plugin validate .claude-plugin/plugin.json  # what the module hooks, calls and reads
 npx -p typescript tsc -p .                         # type-check
 ```
@@ -133,10 +129,12 @@ it loads the mod from this folder, stamped with its version. The root `tsconfig.
 `tsconfig.json` in there. On a fresh clone, run the mod once, for example
 `claude --plugin-dir . -p ok`, before type-checking.
 
-For a live check, use a throwaway session:
+For a live check, use a throwaway session with a one-minute delay. A copy loaded with `--plugin-dir`
+replaces the installed one for that session, and takes its options from `idle-compact@inline`:
 
 ```sh
-IDLE_COMPACT_MS=60000 IDLE_COMPACT_MIN_TOKENS=1000 claude --plugin-dir . --model haiku
+claude --plugin-dir . --model haiku --settings \
+  '{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":1000}}}}'
 ```
 
 ## Related

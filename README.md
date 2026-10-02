@@ -29,7 +29,8 @@ that the conversation is now a summary: see [Caveats](#caveats).
 
 ## What it does
 
-- After every main-loop turn, it arms a timer. Any new prompt, turn, `/clear` or exit cancels it.
+- After every main-loop turn, it arms a timer. The next turn, `/clear` or exit cancels it. A slash
+  command that doesn't call the model leaves it running, because it doesn't refresh the cache.
 - When the timer fires, it checks the context size. Below 60k tokens it does nothing, because a cold
   re-read is cheap and not worth losing detail over.
 - Otherwise it runs the same compaction `/compact` runs. The instructions tell the summariser that the
@@ -41,25 +42,24 @@ that the conversation is now a summary: see [Caveats](#caveats).
   ● idle-compact: compacted at 19:13 after 50 min idle (367k → 12k tokens)
   ```
 
-  The status line goes away when you send your next prompt.
+  The status line goes away when the next turn starts.
 - It compacts once. The compaction itself isn't a turn, so nothing re-arms the timer until you're back.
 
 ### What the hook does
 
 The plugin is one hooks module, [`hooks/register.ts`](hooks/register.ts), and nothing else: no
-skills, commands, agents or MCP servers. It handles four events:
+skills, commands, agents or MCP servers. It handles three events:
 
 | Event | What the hook does |
 |---|---|
 | `turn.complete` | For the main conversation only, starts the idle timer (`$.clock.after`). |
-| `prompt.submit` | Cancels the timer and clears the status line. |
-| `turn.start` | Cancels the timer. |
+| `turn.start` | Cancels the timer and clears the status line. |
 | `session.end` | Cancels the timer and clears the status line. |
 
-It lets every event continue unchanged. It never rewrites a prompt, a tool call or a turn.
+It lets every event continue unchanged. It doesn't hook your prompts or Claude's tool calls.
 
 In prose: the hook starts a timer when a turn of the main conversation completes, and cancels it
-when you submit a prompt, when a turn starts, or when the session ends. If the timer runs out, the
+when the next turn starts or when the session ends. If the timer runs out, the
 hook compacts the conversation.
 
 The only thing it reads is the session's context size (`$.session.usage`). It reads no environment

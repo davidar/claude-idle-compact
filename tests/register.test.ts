@@ -25,7 +25,7 @@ function setup(on: On, { tokens = 200_000, compact = 'ok' }: Setup = {}) {
   })
   on('ui.log', (_$, e) => (seen.logs.push(e.text), { value: undefined }))
   on('ui.status', (_$, e) => (seen.status.push(e.text), { value: undefined }))
-  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   return { clock, seen }
@@ -34,7 +34,7 @@ function setup(on: On, { tokens = 200_000, compact = 'ok' }: Setup = {}) {
 const turnDone = ($: Engine, extra: Partial<TurnCompleteInput> = {}) =>
   $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', ...extra } as TurnCompleteInput)
 
-const prompt = ($: Engine) => $.prompt.submit({ text: 'back', wait: false, origin: { kind: 'composer' } })
+const turnStart = ($: Engine) => $.turn.start({ text: 'back', turnId: 't2' })
 
 describe('timing', () => {
   test('compacts 50 minutes after the last turn', async ($, on) => {
@@ -84,11 +84,11 @@ describe('timing', () => {
 })
 
 describe('cancelling', () => {
-  test('a new prompt cancels the timer', async ($, on) => {
+  test('a new turn cancels the timer', async ($, on) => {
     const { clock, seen } = setup(on)
     await turnDone($)
     await clock.advance(30 * MIN)
-    await prompt($)
+    await turnStart($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
     expect(seen.compacts).toEqual([])
@@ -121,7 +121,7 @@ describe('when it fires', () => {
     expect(seen.compacts.length).toBe(1)
   })
 
-  test('leaves a transcript line and a status line, cleared by the next prompt', async ($, on) => {
+  test('leaves a transcript line and a status line, cleared by the next turn', async ($, on) => {
     const { clock, seen } = setup(on)
     await turnDone($)
     await clock.advance(50 * MIN + 1)
@@ -129,7 +129,7 @@ describe('when it fires', () => {
     const line = 'compacted at 18:50 after 50 min idle (200k → 12k tokens)'
     expect(seen.logs).toEqual([line])
     expect(seen.status).toEqual([line])
-    await prompt($)
+    await turnStart($)
     expect(seen.status).toEqual([line, undefined])
   })
 

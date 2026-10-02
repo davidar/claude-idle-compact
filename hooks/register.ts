@@ -63,7 +63,7 @@ async function compactIfWorthIt($: EngineInterface, state: State, idleSince: num
     const after = result.tokensAfter === undefined ? '' : ` → ${inThousands(result.tokensAfter)}`
     const line = `compacted at ${at} after ${idleMin} min idle (${inThousands(result.tokensBefore ?? before)}${after} tokens)`
     $.ui.log(line)
-    // A prompt sent while the summary ran has already cleared the status; don't pin a stale one.
+    // A turn started while the summary ran has already cleared the status; don't pin a stale one.
     if (fired !== state.generation) return
     $.ui.status(line)
     state.hasStatus = true
@@ -86,21 +86,18 @@ async function arm($: EngineInterface, state: State, options: PluginOptions) {
 }
 
 /**
- * Arms a timer at the end of every main-loop turn and cancels it on any new prompt or turn, so it
- * only fires after a stretch of genuine idle. When it fires and the context is big enough, compacts
- * while the cache is still warm and leaves a note in the transcript and the status line.
+ * Arms a timer at the end of every main-loop turn and cancels it when the next turn starts, so it
+ * runs from the last model request: the last time the cache was refreshed. A prompt that starts no
+ * turn, such as a local slash command, doesn't touch the cache and so doesn't touch the timer.
+ * When it fires and the context is big enough, compacts while the cache is still warm and leaves a
+ * note in the transcript and the status line.
  */
 export const register: Register = (on, options) => {
   const state: State = { generation: 0, hasStatus: false }
 
-  on('prompt.submit', ($, e, next) => {
+  on('turn.start', ($, e, next) => {
     disarm(state)
     clearStatus($, state)
-    return next(e)
-  })
-
-  on('turn.start', (_$, e, next) => {
-    disarm(state)
     return next(e)
   })
 

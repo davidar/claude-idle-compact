@@ -44,6 +44,34 @@ that the conversation is now a summary: see [Caveats](#caveats).
   The status line goes away when you send your next prompt.
 - It compacts once. The compaction itself isn't a turn, so nothing re-arms the timer until you're back.
 
+### What the hook does
+
+The plugin is one hooks module, [`hooks/register.ts`](hooks/register.ts), and nothing else: no
+skills, commands, agents or MCP servers. It handles four events:
+
+| Event | What the hook does |
+|---|---|
+| `turn.complete` | For the main conversation only, starts the idle timer (`$.clock.after`). |
+| `prompt.submit` | Cancels the timer and clears the status line. |
+| `turn.start` | Cancels the timer. |
+| `session.end` | Cancels the timer and clears the status line. |
+
+It lets every event continue unchanged. It never rewrites a prompt, a tool call or a turn.
+
+To pick the delay it reads:
+
+- the session's context size and rate-limit windows (`$.session.usage`)
+- the `promptCacheTtl` setting (`$.settings.read`; it uses no other setting)
+- five environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`,
+  `ENABLE_PROMPT_CACHING_1H`, `IDLE_COMPACT_MS` and `IDLE_COMPACT_MIN_TOKENS`
+
+It reads no API key, token or other credential.
+
+When the timer fires it calls `$.session.compact`, which makes the same model request `/compact`
+makes, on your plan or API key. That is the only thing it sends anywhere. It makes no network
+requests of its own, starts no processes, and reads and writes no files. It writes one line to the
+transcript (`$.ui.log`) and one to the status line (`$.ui.status`).
+
 ### The cache TTL
 
 The delay is derived from the prompt-cache TTL, resolved the way Claude Code resolves it:

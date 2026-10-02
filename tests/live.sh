@@ -9,7 +9,9 @@ set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${IDLE_COMPACT_LIVE_DIR:-${TMPDIR:-/tmp}/idle-compact-live}
-SETTINGS='{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":1000}}}}'
+# One-minute delay, and the one command the subagent scenario may run, by either path.
+SETTINGS='{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":1000}}},
+  "permissions":{"allow":["Bash(bash wait.sh)","Bash(bash '"$WORK"'/subagent/wait.sh)"]}}'
 STORY='Write a 300-word story about a lighthouse keeper.'
 # The transcript line, not the status line (which starts with a warning sign instead).
 COMPACTED='● idle-compact: compacted at'
@@ -31,15 +33,16 @@ wait_for() {
   done
 }
 
+# start <name> <tools>: the session gets only the built-in tools named (none for ""), and no MCP
+# servers or connectors, so a test session can't touch your files or accounts.
 start() {
-  local name=$1
-  shift
+  local name=$1 tools=$2
   mkdir -p "$WORK/$name"
   rm -f "$WORK/$name/debug.log"
   tmux kill-session -t "ic-$name" 2>/dev/null
   tmux new-session -d -s "ic-$name" -x 150 -y 50 -c "$WORK/$name" \
-    claude --plugin-dir "$ROOT" --model haiku \
-    --debug-file "$WORK/$name/debug.log" --settings "$SETTINGS" "$@"
+    claude --plugin-dir "$ROOT" --model haiku --tools "$tools" --strict-mcp-config \
+    --debug-file "$WORK/$name/debug.log" --settings "$SETTINGS"
   # a folder Claude Code hasn't seen asks whether to trust it, with "No, exit" selected; these
   # folders are empty and ours
   if wait_for "$name" 'trust this folder' 6; then
@@ -65,7 +68,7 @@ fail() {
 
 # A turn, then nothing: compacts about a minute after the turn ends.
 baseline() {
-  start baseline
+  start baseline ''
   say baseline "$STORY"
   wait_for baseline "$DONE" 90 || { fail 'baseline: the turn never ended'; return; }
   local t0 t
@@ -79,7 +82,7 @@ baseline() {
 # /context runs locally: it prints its grid inline, starts no turn and only calls count_tokens.
 # Had it reset the timer, the compaction would land 90s or more after the turn, or never.
 slash() {
-  start slash
+  start slash ''
   say slash "$STORY"
   wait_for slash "$DONE" 90 || { fail 'slash: the turn never ended'; return; }
   local t0 t
@@ -97,15 +100,17 @@ slash() {
 # agentId, which the hook ignores, and no turn.start, so the main timer runs on. Compaction succeeds
 # with the agent mid-command and leaves it alone. When the agent finishes, its notification is a
 # main turn: that re-arms the timer, so the session compacts a second time a minute later.
-# Claude Code refuses a long bare `sleep`, so the agent runs it from a script instead.
+# Claude Code refuses a long bare `sleep`, so the agent runs it from a script instead. This is the
+# one scenario with tools: Agent, and Bash for the agent. The settings allow that script and
+# nothing else, so any other command stops at a permission prompt that nobody answers.
 subagent() {
   mkdir -p "$WORK/subagent"
   printf 'sleep 100\necho done\n' >"$WORK/subagent/wait.sh"
-  start subagent --allowedTools 'Bash(bash wait.sh)' Agent
-  say subagent "Use the Agent tool once, with run_in_background set to true, to start one agent with this task: run the bash command 'bash wait.sh' in the foreground (not in the background; it takes 100 seconds), then reply with its output. Do not wait for the agent or check on it: as soon as it has started, reply 'started' and end your turn."
+  start subagent Agent,Bash
+  say subagent "Use the Agent tool once, with run_in_background set to true, to start one agent with this task: run exactly the bash command 'bash wait.sh', with that relative path, in the foreground (not in the background; it takes 100 seconds), then reply with its output. Do not wait for the agent or check on it: as soon as it has started, reply 'started' and end your turn."
   local finished='Agent ".*" finished'
-  # while the agent runs, the finished turn's footer reads "Waiting for 1 background agent to finish"
-  wait_for subagent "background agents\? to finish\|$DONE" 90 || { fail 'subagent: the turn never ended'; return; }
+  # with the agent still running the turn has no "for Ns" footer; its last line is the reply
+  wait_for subagent "^● started\|background agents\? to finish\|$DONE" 90 || { fail 'subagent: the turn never ended'; return; }
   wait_for subagent "$COMPACTED" 100 || { fail 'subagent: no compaction while the agent ran'; return; }
   [ "$(count subagent "$finished")" -eq 0 ] || { fail 'subagent: the agent ended before the compaction'; return; }
   wait_for subagent "$finished" 90 || { fail 'subagent: the agent never reported back'; return; }

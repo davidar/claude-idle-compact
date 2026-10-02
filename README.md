@@ -58,38 +58,24 @@ skills, commands, agents or MCP servers. It handles four events:
 
 It lets every event continue unchanged. It never rewrites a prompt, a tool call or a turn.
 
-To pick the delay it reads:
-
-- the session's context size and rate-limit windows (`$.session.usage`)
-- the `promptCacheTtl` setting (`$.settings.read`; it uses no other setting)
-- five environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`,
-  `ENABLE_PROMPT_CACHING_1H`, `IDLE_COMPACT_MS` and `IDLE_COMPACT_MIN_TOKENS`
-
-It reads no API key, token or other credential.
+It reads three things: the session's context size (`$.session.usage`), and the two environment
+variables `IDLE_COMPACT_MS` and `IDLE_COMPACT_MIN_TOKENS`. It reads no settings, and no API key,
+token or other credential.
 
 When the timer fires it calls `$.session.compact`, which makes the same model request `/compact`
 makes, on your plan or API key. That is the only thing it sends anywhere. It makes no network
 requests of its own, starts no processes, and reads and writes no files. It writes one line to the
 transcript (`$.ui.log`) and one to the status line (`$.ui.status`).
 
-### The cache TTL
+### It assumes a 1-hour cache
 
-The delay is derived from the prompt-cache TTL, resolved the way Claude Code resolves it:
-
-1. `FORCE_PROMPT_CACHING_5M` → 5 minutes
-2. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` / `1h`)
-3. the `promptCacheTtl` setting (`5m` / `1h`)
-4. `ENABLE_PROMPT_CACHING_1H` → 1 hour
-5. otherwise automatic: 1 hour on a Claude subscription within its usage limits; 5 minutes on an API
-   key, Bedrock, Vertex or Foundry.
-
-On a **1-hour** cache it compacts after 50 minutes idle, which leaves 10 minutes of margin. A
+idle-compact is for sessions with a 1-hour prompt cache, which is what a Claude subscription gets
+within its usage limits. It doesn't check: it waits 50 minutes, which leaves 10 minutes of margin. A
 367k-token summary pass took under 2 minutes.
 
-On a **5-minute** cache it stays off and says so once per session. Compacting after 3 or 4 minutes of
-reading would be more disruptive than helpful. If you're on an API key and want this, set
-`"promptCacheTtl": "1h"` in your settings (1-hour cache writes cost 2× instead of 1.25×). You can also
-set `idleMinutes` to force a delay.
+On a 5-minute cache (an API key, Bedrock, Vertex or Foundry by default) it has nothing to offer,
+because the cache is long cold by the time it fires. Don't install it there, unless you also set
+`"promptCacheTtl": "1h"` in your settings.
 
 ## Install
 
@@ -111,7 +97,7 @@ Set these with `/plugin configure idle-compact@idle-compact`, or in `/config`:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `idleMinutes` | `0` (automatic) | Minutes idle before compacting. `0` means 50 on a 1-hour cache and off on a 5-minute one. |
+| `idleMinutes` | `50` | Minutes idle before compacting. |
 | `minTokens` | `60000` | Leave contexts smaller than this alone. |
 
 Two environment variables override both options. They're mainly for testing:
@@ -128,10 +114,9 @@ Two environment variables override both options. They're mainly for testing:
 - **The transcript records it as a manual compaction.** It goes through the same path as `/compact`,
   so the transcript JSONL marks it with `trigger: "manual"`. To find one afterwards, look for the
   "compacted at …" line, which is written to the transcript and shown again after `--resume`.
-- **The automatic TTL is inferred.** A mod can't read the TTL Claude Code actually chose, so
-  idle-compact repeats Claude Code's own resolution. It detects a subscription by the plan windows
-  (`five_hour` / `seven_day`) in the session's rate limits. If Claude Code changes how it picks the
-  TTL, set `idleMinutes` or `promptCacheTtl` explicitly.
+- **It doesn't know your cache TTL.** A mod can't read the TTL Claude Code chose, so idle-compact
+  assumes 1 hour. A subscription past its usage limits drops to a 5-minute cache, and there the
+  compaction runs on a cold cache: it costs about what the cold return would have, and saves nothing.
 - **A mod runs with your permissions.** `claude plugin validate .` on a clone shows what the module
   hooks, calls and reads, without running it.
 

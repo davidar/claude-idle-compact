@@ -1,4 +1,4 @@
-import type { On, SessionRateLimit, Settings, TurnCompleteInput } from 'claude-code'
+import type { On, TurnCompleteInput } from 'claude-code'
 import { type Engine, describe, expect, mock, test, tier } from 'claude-code/testing'
 
 tier('user')
@@ -6,27 +6,19 @@ tier('user')
 const MIN = 60_000
 const SUMMARY = { role: 'user' as const, text: 'summary', toolUses: [] }
 
-const SUBSCRIPTION: SessionRateLimit[] = [
-  { kind: 'five_hour', percentUsed: 17 },
-  { kind: 'seven_day', percentUsed: 41 },
-]
-
 type Setup = {
   env?: Record<string, string>
-  settings?: Settings
-  rateLimits?: SessionRateLimit[]
   tokens?: number
   compact?: 'ok' | 'skip' | 'throw'
 }
 
 /** Answers everything the module reads beneath it, and records what it does. */
-function setup(on: On, { env = {}, settings = {}, rateLimits = SUBSCRIPTION, tokens = 200_000, compact = 'ok' }: Setup = {}) {
+function setup(on: On, { env = {}, tokens = 200_000, compact = 'ok' }: Setup = {}) {
   const clock = mock.clock(on, { now: Date.parse('2026-09-29T18:00:00') })
   mock.env(on, env)
   const seen = { compacts: [] as string[], logs: [] as string[], status: [] as (string | undefined)[] }
-  on('settings.read', () => ({ value: settings }))
   on('session.usage', () => ({
-    value: { startedAt: 0, context: { tokens, window: 1_000_000, percent: 20 }, rateLimits },
+    value: { startedAt: 0, context: { tokens, window: 1_000_000, percent: 20 }, rateLimits: [] },
   }))
   on('session.compact', (_$, e) => {
     if (compact === 'throw') throw new Error('a turn is running')
@@ -47,7 +39,7 @@ const turnDone = ($: Engine, extra: Partial<TurnCompleteInput> = {}) =>
 const prompt = ($: Engine) => $.prompt.submit({ text: 'back', wait: false, origin: { kind: 'composer' } })
 
 describe('timing', () => {
-  test('compacts 50 minutes after the last turn on a 1-hour cache', async ($, on) => {
+  test('compacts 50 minutes after the last turn', async ($, on) => {
     const { clock, seen } = setup(on)
     await turnDone($)
     await clock.advance(50 * MIN - 1)
@@ -64,6 +56,14 @@ describe('timing', () => {
     await clock.advance(999)
     expect(seen.compacts).toEqual([])
     await clock.advance(2)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+  })
+
+  test('idleMinutes 0 means the default 50 minutes', { options: { idleMinutes: 0 } }, async ($, on) => {
+    const { clock, seen } = setup(on)
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
     await clock.settle()
     expect(seen.compacts.length).toBe(1)
   })
@@ -90,43 +90,6 @@ describe('timing', () => {
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
     expect(seen.compacts).toEqual([])
-  })
-})
-
-describe('cache TTL', () => {
-  for (const [name, s] of [
-    ['the promptCacheTtl setting', { settings: { promptCacheTtl: '5m' } }],
-    ['CLAUDE_CODE_PROMPT_CACHE_TTL', { env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' } }],
-    ['FORCE_PROMPT_CACHING_5M', { env: { FORCE_PROMPT_CACHING_5M: '1' } }],
-    ['an API key (no plan windows)', { rateLimits: [] }],
-    ['a subscription past its limits', { rateLimits: [{ kind: 'five_hour', percentUsed: 100 }] }],
-  ] as [string, Setup][]) {
-    test(`stays off on a 5-minute cache from ${name}, and says so once`, async ($, on) => {
-      const { clock, seen } = setup(on, s)
-      await turnDone($)
-      await turnDone($)
-      await clock.advance(2 * 60 * MIN)
-      await clock.settle()
-      expect(seen.compacts).toEqual([])
-      expect(seen.logs.length).toBe(1)
-      expect(seen.logs[0]).toContain('off')
-    })
-  }
-
-  test('an API key with promptCacheTtl 1h is on', async ($, on) => {
-    const { clock, seen } = setup(on, { rateLimits: [], settings: { promptCacheTtl: '1h' } })
-    await turnDone($)
-    await clock.advance(50 * MIN + 1)
-    await clock.settle()
-    expect(seen.compacts.length).toBe(1)
-  })
-
-  test('idleMinutes turns it on over a 5-minute cache', { options: { idleMinutes: 3 } }, async ($, on) => {
-    const { clock, seen } = setup(on, { rateLimits: [] })
-    await turnDone($)
-    await clock.advance(3 * MIN + 1)
-    await clock.settle()
-    expect(seen.compacts.length).toBe(1)
   })
 })
 

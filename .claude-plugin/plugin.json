@@ -1,6 +1,6 @@
 {
   "name": "idle-compact",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Compacts an idle interactive session shortly before its prompt cache expires, so coming back later doesn't re-read the whole context uncached.",
   "author": { "name": "David Roberts" },
   "homepage": "https://github.com/davidar/claude-idle-compact",
@@ -11,8 +11,8 @@
     "idleMinutes": {
       "type": "number",
       "title": "Idle minutes",
-      "description": "Minutes idle before compacting. 0 means automatic: 50 on a 1-hour prompt cache, off on a 5-minute one.",
-      "default": 0,
+      "description": "Minutes idle before compacting. The default of 50 leaves 10 minutes before a 1-hour prompt cache expires.",
+      "default": 50,
       "min": 0
     },
     "minTokens": {

@@ -1,4 +1,4 @@
-import type { ModelUsage, On, TurnCompleteInput } from 'claude-code'
+import type { ContextCategory, ContextCategoryKind, ModelUsage, On, SessionContextBreakdown, TurnCompleteInput } from 'claude-code'
 import { type Engine, describe, expect, mock, test, tier } from 'claude-code/testing'
 
 tier('user')
@@ -7,20 +7,38 @@ const MIN = 60_000
 const SUMMARY = { role: 'user' as const, text: 'summary', toolUses: [] }
 
 type Setup = {
+  /** The whole context; null for unknown, as after a compaction. */
   tokens?: number | null
+  /** The conversation (the breakdown's Messages row); null for no breakdown. 20k of system prompt and tools by default. */
+  messages?: number | null
   compact?: 'ok' | 'skip' | 'throw'
   usage?: ModelUsage
 }
 
+const row = (name: string, tokens: number, kind: ContextCategoryKind = 'used'): ContextCategory =>
+  ({ name, tokens, kind, color: 'inactive', isDeferred: false })
+
+/** What /context would list: the system prompt and tools, the conversation, the rest of the window. */
+function breakdown(tokens: number | null, messages: number): SessionContextBreakdown {
+  const total = tokens ?? messages
+  return {
+    categories: [row('System prompt', total - messages), row('Messages', messages), row('Free space', 1_000_000 - total, 'free')],
+    totalTokens: total, maxTokens: 1_000_000, rawMaxTokens: 1_000_000, autocompactSource: 'model-default', percentage: Math.round(total / 10_000),
+    gridRows: [], model: 'test', memoryFiles: [], mcpTools: [], agents: [], isAutoCompactEnabled: true, apiUsage: null,
+  }
+}
+
 /** Answers everything the module reads beneath it, and records what it does. */
-function setup(on: On, { tokens = 200_000, compact = 'ok', usage }: Setup = {}) {
+function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : tokens - 20_000, compact = 'ok', usage }: Setup = {}) {
   const clock = mock.clock(on, { now: Date.parse('2026-09-29T18:00:00') })
   // lateMs: how late the timer fires, as after the machine slept. The module reads the usage
   // before the time, so the usage hook is where the clock runs on.
   const seen = { compacts: [] as string[], logs: [] as string[], status: [] as (string | undefined)[], lateMs: 0 }
-  on('session.usage', async () => {
+  on('session.usage', async (_$, e) => {
     if (seen.lateMs) await clock.advance(seen.lateMs)
-    return { value: { startedAt: 0, context: { tokens: tokens ?? undefined, window: 1_000_000 }, rateLimits: [] } }
+    const context = { tokens: tokens ?? undefined, window: 1_000_000 }
+    const withBreakdown = e.breakdown && messages !== null ? { ...context, breakdown: breakdown(tokens, messages) } : context
+    return { value: { startedAt: 0, context: withBreakdown, rateLimits: [] } }
   })
   on('session.compact', (_$, e) => {
     if (compact === 'throw') throw new Error('a turn is running')
@@ -109,16 +127,32 @@ describe('cancelling', () => {
 })
 
 describe('when it fires', () => {
-  test('small contexts are left alone', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 59_000 })
+  test('small conversations are left alone, however big the system prompt and tools', async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: 120_000, messages: 39_000 })
     await turnDone($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
     expect(seen.compacts).toEqual([])
   })
 
+  test('the floor is on the conversation', async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: 61_000, messages: 41_000 })
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+  })
+
   test('the minTokens option sets the floor', { options: { minTokens: 10_000 } }, async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 20_000 })
+    const { clock, seen } = setup(on, { tokens: 30_000, messages: 11_000 })
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+  })
+
+  test('without a breakdown, the whole context counts', async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: 200_000, messages: null })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()

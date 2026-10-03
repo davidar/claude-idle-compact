@@ -10,7 +10,7 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${IDLE_COMPACT_LIVE_DIR:-${TMPDIR:-/tmp}/idle-compact-live}
 # One-minute delay, and the one command the subagent scenario may run, by either path.
-SETTINGS='{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":1000}}},
+SETTINGS='{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":100}}},
   "permissions":{"allow":["Bash(bash wait.sh)","Bash(bash '"$WORK"'/subagent/wait.sh)"]}}'
 STORY='Write a 300-word story about a lighthouse keeper.'
 # The transcript line, not the status line (which starts with a warning sign instead).

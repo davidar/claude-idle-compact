@@ -19,9 +19,9 @@
     },
     "minTokens": {
       "type": "number",
-      "title": "Minimum context tokens",
-      "description": "Leave smaller contexts alone: re-reading them cold is cheap.",
-      "default": 60000,
+      "title": "Minimum conversation tokens",
+      "description": "Leave smaller conversations alone: re-reading them cold is cheap. The system prompt and tools don't count.",
+      "default": 40000,
       "min": 0
     }
   }

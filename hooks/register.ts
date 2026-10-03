@@ -1,11 +1,12 @@
-import type { EngineInterface, ModelUsage, PluginOptions, Register, Timer } from 'claude-code'
+import type { EngineInterface, ModelUsage, PluginOptions, Register, SessionContextUsage, Timer } from 'claude-code'
 
 // How long before a 1-hour cache lapses to compact. A 367k-token summary pass took about 2 minutes.
 // Also how late the timer may fire and still compact.
 const MARGIN_MS = 10 * 60_000
 const HOUR_MS = 60 * 60_000
-// Below this many input tokens a cold re-read is cheap; not worth losing detail.
-const DEFAULT_MIN_TOKENS = 60_000
+// Below this many conversation tokens a cold re-read is cheap; not worth losing detail. The system
+// prompt and tools don't count: compaction leaves them in place, and they are re-cached either way.
+const DEFAULT_MIN_TOKENS = 40_000
 
 function nonNegative(raw: unknown): number | undefined {
   if (raw === undefined || raw === '') return undefined
@@ -21,6 +22,19 @@ function cacheShare(usage: ModelUsage | undefined) {
   if (!usage) return ''
   const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
   return input ? `, ${Math.floor((usage.cache_read_input_tokens * 100) / input)}% read from cache` : ''
+}
+
+/**
+ * What compaction can shrink: the conversation, as /context's Messages row counts it. The whole
+ * context when there is no breakdown.
+ *
+ * The row is a residual: the last response's input less the other rows. That needs the `full`
+ * breakdown, which counts the other rows with the token-count API; the `summary` one estimates
+ * them, and was seen putting the tools at twice their size, which left 2 tokens of conversation.
+ */
+function conversationTokens(context: SessionContextUsage) {
+  const row = context.breakdown?.categories.find((c) => c.kind === 'used' && c.name === 'Messages')
+  return row?.tokens ?? context.tokens
 }
 
 /** Idle time before compacting. It assumes the 1-hour cache: the mod is no use on a 5-minute one. */
@@ -60,9 +74,10 @@ function clearStatus($: EngineInterface, state: State) {
 async function compactIfWorthIt($: EngineInterface, state: State, idleSince: number, latest: number, floor: number) {
   const fired = state.generation
   try {
-    const { context } = await $.session.usage()
+    const { context } = await $.session.usage({ breakdown: 'full' })
+    // Unknown after a compaction until the next response: nothing to shrink then either.
+    if ((conversationTokens(context) ?? 0) < floor) return
     const before = context.tokens ?? 0
-    if (before < floor) return
     const now = await $.clock.now()
     const at = hhmm(now)
     const idleMin = Math.round((now - idleSince) / 60_000)

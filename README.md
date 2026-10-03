@@ -31,8 +31,10 @@ that the conversation is now a summary: see [Caveats](#caveats).
 
 - After every main-loop turn, it arms a timer. The next turn, `/clear` or exit cancels it. A slash
   command that doesn't call the model leaves it running, because it doesn't refresh the cache.
-- When the timer fires, it checks the context size. Below 60k tokens it does nothing, because a cold
-  re-read is cheap and not worth losing detail over.
+- When the timer fires, it checks how big the conversation is, as `/context`'s Messages row counts
+  it. Below 40k tokens it does nothing, because a cold re-read is cheap and not worth losing detail
+  over. The system prompt and tool definitions don't count: compaction can't shrink them, and they
+  get re-cached on your return either way.
 - Otherwise it runs the same compaction `/compact` runs. The instructions tell the summariser that the
   user stepped away, and what to keep: open tasks, decisions and their reasons, follow-ups with dates,
   file paths, and anything the user asked to remember.
@@ -69,13 +71,15 @@ In prose: the hook starts a timer when a turn of the main conversation completes
 when the next turn starts or when the session ends. If the timer runs out, the
 hook compacts the conversation, unless the timer fired too late for the cache to still be warm.
 
-The only thing it reads is the session's context size (`$.session.usage`). It reads no environment
-variables, settings or files.
+The only thing it reads is the session's context size and its `/context` breakdown
+(`$.session.usage`). It reads no environment variables, settings or files.
 
-When the timer fires it calls `$.session.compact`, which makes the same model request `/compact`
-makes, on your own account. That is the only thing it sends anywhere. It makes no network
-requests of its own, starts no processes, and reads and writes no files. It writes one line to the
-transcript (`$.ui.log`) and one to the status line (`$.ui.status`).
+When the timer fires it asks for that breakdown counted properly, which has Claude Code make the
+same token-count requests `/context` makes (they cost no tokens), and then calls
+`$.session.compact`, which makes the same model request `/compact` makes, on your own account.
+Those are the only things it sends anywhere. It makes no network requests of its own, starts no
+processes, and reads and writes no files. It writes one line to the transcript (`$.ui.log`) and one
+to the status line (`$.ui.status`).
 
 ### It assumes a 1-hour cache
 
@@ -108,7 +112,7 @@ Set these with `/plugin configure idle-compact@idle-compact`, or in `/config`:
 | Option | Default | Meaning |
 |---|---|---|
 | `idleMinutes` | `50` | Minutes idle before compacting. |
-| `minTokens` | `60000` | Leave contexts smaller than this alone. It counts the whole context, system prompt and tools included. |
+| `minTokens` | `40000` | Leave conversations smaller than this alone. It counts the conversation only (`/context`'s Messages row), not the system prompt and tools. |
 
 ## Caveats
 
@@ -146,7 +150,7 @@ replaces the installed one for that session, and takes its options from `idle-co
 
 ```sh
 claude --plugin-dir . --model haiku --settings \
-  '{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":1000}}}}'
+  '{"pluginConfigs":{"idle-compact@inline":{"options":{"idleMinutes":1,"minTokens":100}}}}'
 ```
 
 ## Related

@@ -21,8 +21,8 @@ the cache is still warm:
 | | Cold return, no compaction | idle-compact at 50 min |
 |---|---|---|
 | Summary pass | none | reads 367k from cache at about 0.1× input price, writes a few thousand output tokens |
-| First request back | re-caches 367k at 2× input price (1-hour cache write) | re-caches the ~12k summary |
-| Roughly, in input-token equivalents | ~730k | ~100k |
+| First request back | re-caches 367k at 2× input price (1-hour cache write) | re-caches the ~12k summary, plus the system prompt and tools |
+| Roughly, in input-token equivalents | ~730k | ~100k, plus twice the system prompt and tools |
 
 Cache reads are even cheaper than 0.1× on some current models, which makes the gap bigger. The cost is
 that the conversation is now a summary: see [Caveats](#caveats).
@@ -39,10 +39,15 @@ that the conversation is now a summary: see [Caveats](#caveats).
 - It leaves a line in the transcript and a pinned status line under the prompt:
 
   ```
-  ● idle-compact: compacted at 19:13 after 50 min idle (367k → 12k tokens)
+  ● idle-compact: compacted at 19:13 after 50 min idle (367k tokens → 12k summary, 99% read from cache)
   ```
 
-  The status line goes away when the next turn starts.
+  The first figure is the whole context before. The second is the summary alone: the context you
+  come back to is that plus the system prompt and tool definitions, which compaction can't shrink.
+  The percentage is how much of the summary request's input the prompt cache served, which is the
+  saving. The status line goes away when the next turn starts.
+- If the timer fires more than 10 minutes late, which happens when the machine was asleep, the cache
+  has already expired. It doesn't compact then, and leaves a line in the transcript saying so.
 - It compacts once per idle stretch. The compaction itself isn't a turn, so nothing re-arms the timer
   until the next turn. A background agent reporting back counts as a turn, so a session can compact
   again after one, if the context has grown past the floor by then.
@@ -62,7 +67,7 @@ It lets every event continue unchanged. It doesn't hook your prompts or Claude's
 
 In prose: the hook starts a timer when a turn of the main conversation completes, and cancels it
 when the next turn starts or when the session ends. If the timer runs out, the
-hook compacts the conversation.
+hook compacts the conversation, unless the timer fired too late for the cache to still be warm.
 
 The only thing it reads is the session's context size (`$.session.usage`). It reads no environment
 variables, settings or files.
@@ -103,7 +108,7 @@ Set these with `/plugin configure idle-compact@idle-compact`, or in `/config`:
 | Option | Default | Meaning |
 |---|---|---|
 | `idleMinutes` | `50` | Minutes idle before compacting. |
-| `minTokens` | `60000` | Leave contexts smaller than this alone. |
+| `minTokens` | `60000` | Leave contexts smaller than this alone. It counts the whole context, system prompt and tools included. |
 
 ## Caveats
 
@@ -115,6 +120,7 @@ Set these with `/plugin configure idle-compact@idle-compact`, or in `/config`:
 - **It doesn't know your cache TTL.** A mod can't read the TTL Claude Code chose, so idle-compact
   assumes 1 hour. A subscription past its usage limits drops to a 5-minute cache, and there the
   compaction runs on a cold cache: it costs about what the cold return would have, and saves nothing.
+  The line it leaves shows this as a low "read from cache" percentage.
 - **A mod runs with your permissions.** `claude plugin validate .` on a clone shows what the module
   hooks, calls and reads, without running it.
 

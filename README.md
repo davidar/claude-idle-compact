@@ -93,12 +93,22 @@ because the cache is long cold by the time it fires. Don't install it there, unl
 
 ## Install
 
-Add this repo as a marketplace and install the plugin:
+It's in the Anthropic Directory, which Claude Code has built in. Find Idle Compact under `/plugin`,
+or run:
+
+```
+/plugin install idle-compact@anthropic-plugin-directory
+```
+
+Each version there is reviewed by Anthropic before it goes live, so it can trail this repo. To get
+releases as soon as they're pushed, add this repo as a marketplace and install from it instead:
 
 ```
 /plugin marketplace add davidar/claude-idle-compact
 /plugin install idle-compact@idle-compact
 ```
+
+Install one or the other, not both.
 
 To try it without installing, run `claude --plugin-dir /path/to/claude-idle-compact`.
 
@@ -107,7 +117,8 @@ Claude Code ignores it now.
 
 ## Configure
 
-Set these with `/plugin configure idle-compact@idle-compact`, or in `/config`:
+Set these with `/plugin configure idle-compact@anthropic-plugin-directory` (or
+`idle-compact@idle-compact` if you installed from this repo), or in `/config`:
 
 | Option | Default | Meaning |
 |---|---|---|

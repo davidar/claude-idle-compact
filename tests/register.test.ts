@@ -135,6 +135,23 @@ describe('when it fires', () => {
     expect(seen.compacts).toEqual([])
   })
 
+  test('a conversation under the floor says why it was left alone', async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: 32_000, messages: 12_000 })
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
+    await clock.settle()
+    expect(seen.logs).toEqual(['not compacted: the conversation is 12k tokens, under the 40k floor'])
+    expect(seen.status).toEqual([])
+  })
+
+  test('a small floor reads as it is', { options: { minTokens: 100 } }, async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: 20_050, messages: 50 })
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
+    await clock.settle()
+    expect(seen.logs).toEqual(['not compacted: the conversation is 50 tokens, under the 100 floor'])
+  })
+
   test('the floor is on the conversation', async ($, on) => {
     const { clock, seen } = setup(on, { tokens: 61_000, messages: 41_000 })
     await turnDone($)
@@ -200,7 +217,16 @@ describe('when it fires', () => {
     expect(seen.compacts.length).toBe(1)
   })
 
-  test('an unknown context size, as after a manual /compact, is left alone', async ($, on) => {
+  test('an unknown context size, as after a manual /compact, is left alone without a word', async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: null })
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+    expect(seen.logs).toEqual([])
+  })
+
+  test('an unknown context size is left alone even with no floor', { options: { minTokens: 0 } }, async ($, on) => {
     const { clock, seen } = setup(on, { tokens: null })
     await turnDone($)
     await clock.advance(50 * MIN + 1)

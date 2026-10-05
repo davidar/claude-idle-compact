@@ -16,6 +16,8 @@ function nonNegative(raw: unknown): number | undefined {
 
 const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5)
 const inThousands = (n: number) => `${Math.round(n / 1000)}k`
+// Small figures as they are: a 100-token floor isn't "0k".
+const approx = (n: number) => (n < 1000 ? `${n}` : inThousands(n))
 
 /** How much of the summary request's input the prompt cache served: the saving this mod exists for. */
 function cacheShare(usage: ModelUsage | undefined) {
@@ -76,7 +78,12 @@ async function compactIfWorthIt($: EngineInterface, state: State, idleSince: num
   try {
     const { context } = await $.session.usage({ breakdown: 'full' })
     // Unknown after a compaction until the next response: nothing to shrink then either.
-    if ((conversationTokens(context) ?? 0) < floor) return
+    if (context.tokens === undefined) return
+    const conversation = conversationTokens(context) ?? 0
+    if (conversation < floor) {
+      $.ui.log(`not compacted: the conversation is ${approx(conversation)} tokens, under the ${approx(floor)} floor`)
+      return
+    }
     const before = context.tokens ?? 0
     const now = await $.clock.now()
     const at = hhmm(now)

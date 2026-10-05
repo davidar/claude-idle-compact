@@ -32,9 +32,10 @@ that the conversation is now a summary: see [Caveats](#caveats).
 - After every main-loop turn, it arms a timer. The next turn, `/clear` or exit cancels it. A slash
   command that doesn't call the model leaves it running, because it doesn't refresh the cache.
 - When the timer fires, it checks how big the conversation is, as `/context`'s Messages row counts
-  it. Below 40k tokens it does nothing, because a cold re-read is cheap and not worth losing detail
-  over. The system prompt and tool definitions don't count: compaction can't shrink them, and they
-  get re-cached on your return either way.
+  it. Below 40k tokens it doesn't compact, because a cold re-read is cheap and not worth losing
+  detail over, and leaves a line in the transcript saying so (`not compacted: the conversation is
+  12k tokens, under the 40k floor`). The system prompt and tool definitions don't count: compaction
+  can't shrink them, and they get re-cached on your return either way.
 - Otherwise it runs the same compaction `/compact` runs. The instructions tell the summariser that the
   user stepped away, and what to keep: open tasks, decisions and their reasons, follow-ups with dates,
   file paths, and anything the user asked to remember.

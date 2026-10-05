@@ -38,9 +38,11 @@ function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : t
   // lateMs: how late the timer fires, as after the machine slept. The module reads the usage
   // before the time, so the usage hook is where the clock runs on.
   // duringRead: run once while the module reads `$.state`, to overtake a re-arm.
+  // duringWrite: run once before a write to `$.state` lands, to overtake an arm.
   const seen = {
     compacts: [] as string[], logs: [] as string[], status: [] as (string | undefined)[], lateMs: 0,
     stored, duringRead: undefined as (() => Promise<unknown>) | undefined,
+    duringWrite: undefined as (() => Promise<unknown>) | undefined,
   }
   on('session.usage', async (_$, e) => {
     if (seen.lateMs) await clock.advance(seen.lateMs)
@@ -67,7 +69,13 @@ function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : t
     if (during) await during()
     return { value: { value, version: 0 } }
   })
-  on('state.set', (_$, e) => ((seen.stored = e.value as Stored), { value: { isSet: true as const, version: 1 } }))
+  on('state.set', async (_$, e) => {
+    const during = seen.duringWrite
+    seen.duringWrite = undefined
+    if (during) await during()
+    seen.stored = e.value as Stored
+    return { value: { isSet: true as const, version: 1 } }
+  })
   return { clock, seen }
 }
 
@@ -224,6 +232,17 @@ describe('reloading', () => {
   test('a turn that starts while a reload reads the stored turn wins', async ($, on) => {
     const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
     seen.duringRead = () => turnStart($)
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+  })
+
+  test('a turn that starts while the end time is being stored leaves nothing for a reload', async ($, on) => {
+    const { clock, seen } = setup(on)
+    seen.duringWrite = () => turnStart($)
+    await turnDone($)
+    expect(seen.stored).toBe(null)
     await reload($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()

@@ -135,9 +135,10 @@ async function arm($: EngineInterface, state: State, options: PluginOptions) {
   const sessionId = await $.session.id()
   if (armed !== state.generation) return
   schedule($, state, idleSince, delay, delay, minTokens(options))
-  // Kept for a reload of the module, which cancels the timer. A turn.start that disarms meanwhile
-  // clears it after this write.
+  // Kept for a reload of the module, which cancels the timer.
   await $.state.set(LAST_TURN, { sessionId, at: idleSince })
+  // A turn.start that disarmed meanwhile may have cleared it before this write landed.
+  if (armed !== state.generation) await forget($)
 }
 
 /** After a reload: re-arms for what is left of the delay since this session's last turn, if any. */

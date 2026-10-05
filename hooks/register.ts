@@ -164,7 +164,8 @@ async function rearm($: EngineInterface, state: State, options: PluginOptions) {
  * `$.state`, so a reload of the module, which cancels the timer, re-arms it for the time left.
  */
 export const register: Register = (on, options) => {
-  const state: State = { generation: 0, hasStatus: false }
+  // A reloaded module can't tell whether the one before it pinned a status: assume it did.
+  const state: State = { generation: 0, hasStatus: true }
 
   on('turn.start', async ($, e, next) => {
     disarm(state)

@@ -230,6 +230,12 @@ describe('reloading', () => {
     expect(seen.compacts).toEqual([])
   })
 
+  test("a reloaded module clears the status line its predecessor pinned", async ($, on) => {
+    const { seen } = setup(on)
+    await turnStart($)
+    expect(seen.status).toEqual([undefined])
+  })
+
   test('a reload after the compaction does not compact again', async ($, on) => {
     const { clock, seen } = setup(on)
     await turnDone($)

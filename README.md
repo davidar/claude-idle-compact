@@ -51,6 +51,9 @@ that the conversation is now a summary: see [Caveats](#caveats).
   saving. The status line goes away when the next turn starts.
 - If the timer fires more than 10 minutes late, which happens when the machine was asleep, the cache
   has already expired. It doesn't compact then, and leaves a line in the transcript saying so.
+- A reload of the plugin (an update, a change to its options) cancels the timer, so it keeps the
+  time the last turn ended and re-arms for whatever is left. The compaction still comes 50 minutes
+  after the turn, not 50 minutes after the reload. If that time has already passed, it does nothing.
 - It compacts once per idle stretch. The compaction itself isn't a turn, so nothing re-arms the timer
   until the next turn. A background agent reporting back counts as a turn, so a session can compact
   again after one, if the context has grown past the floor by then.
@@ -58,22 +61,26 @@ that the conversation is now a summary: see [Caveats](#caveats).
 ### What the hook does
 
 The plugin is one hooks module, [`hooks/register.ts`](hooks/register.ts), and nothing else: no
-skills, commands, agents or MCP servers. It handles three events:
+skills, commands, agents or MCP servers. It handles four events:
 
 | Event | What the hook does |
 |---|---|
-| `turn.complete` | For the main conversation only, starts the idle timer (`$.clock.after`). |
-| `turn.start` | Cancels the timer and clears the status line. |
-| `session.end` | Cancels the timer and clears the status line. |
+| `turn.complete` | For the main conversation only, starts the idle timer (`$.clock.after`) and notes the time. |
+| `turn.start` | Cancels the timer, forgets the time and clears the status line. |
+| `session.end` | Cancels the timer, forgets the time and clears the status line. |
+| `session.start` | When the plugin is loaded or reloaded, restarts the timer for what's left of it, if anything. |
 
 It lets every event continue unchanged. It doesn't hook your prompts or Claude's tool calls.
 
 In prose: the hook starts a timer when a turn of the main conversation completes, and cancels it
 when the next turn starts or when the session ends. If the timer runs out, the
 hook compacts the conversation, unless the timer fired too late for the cache to still be warm.
+When the plugin is reloaded, the hook restarts the timer for the time that was left.
 
-The only thing it reads is the session's context size and its `/context` breakdown
-(`$.session.usage`). It reads no environment variables, settings or files.
+The only things it reads are the session's context size and its `/context` breakdown
+(`$.session.usage`), the session's id (`$.session.id`), and the one value it keeps: the session id and
+the time of its last turn, in the plugin state Claude Code holds for the running session
+(`$.state`). It reads no environment variables, settings or files.
 
 When the timer fires it asks for that breakdown counted properly, which has Claude Code make the
 same token-count requests `/context` makes (they cost no tokens), and then calls

@@ -13,7 +13,11 @@ type Setup = {
   messages?: number | null
   compact?: 'ok' | 'skip' | 'throw'
   usage?: ModelUsage
+  /** What `$.state` holds at the start, as a reloaded module finds it. */
+  stored?: Stored
 }
+
+type Stored = { sessionId: string; at: number } | null
 
 const row = (name: string, tokens: number, kind: ContextCategoryKind = 'used'): ContextCategory =>
   ({ name, tokens, kind, color: 'inactive', isDeferred: false })
@@ -29,11 +33,15 @@ function breakdown(tokens: number | null, messages: number): SessionContextBreak
 }
 
 /** Answers everything the module reads beneath it, and records what it does. */
-function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : tokens - 20_000, compact = 'ok', usage }: Setup = {}) {
-  const clock = mock.clock(on, { now: Date.parse('2026-09-29T18:00:00') })
+function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : tokens - 20_000, compact = 'ok', usage, stored = null }: Setup = {}) {
+  const clock = mock.clock(on, { now: T0 })
   // lateMs: how late the timer fires, as after the machine slept. The module reads the usage
   // before the time, so the usage hook is where the clock runs on.
-  const seen = { compacts: [] as string[], logs: [] as string[], status: [] as (string | undefined)[], lateMs: 0 }
+  // duringRead: run once while the module reads `$.state`, to overtake a re-arm.
+  const seen = {
+    compacts: [] as string[], logs: [] as string[], status: [] as (string | undefined)[], lateMs: 0,
+    stored, duringRead: undefined as (() => Promise<unknown>) | undefined,
+  }
   on('session.usage', async (_$, e) => {
     if (seen.lateMs) await clock.advance(seen.lateMs)
     const context = { tokens: tokens ?? undefined, window: 1_000_000 }
@@ -50,6 +58,16 @@ function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : t
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 's1' }))
+  on('state.get', async () => {
+    const value = seen.stored
+    const during = seen.duringRead
+    seen.duringRead = undefined
+    if (during) await during()
+    return { value: { value, version: 0 } }
+  })
+  on('state.set', (_$, e) => ((seen.stored = e.value as Stored), { value: { isSet: true as const, version: 1 } }))
   return { clock, seen }
 }
 
@@ -57,6 +75,11 @@ const turnDone = ($: Engine, extra: Partial<TurnCompleteInput> = {}) =>
   $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', ...extra } as TurnCompleteInput)
 
 const turnStart = ($: Engine) => $.turn.start({ text: 'back', turnId: 't2' })
+
+/** What a reload of the module raises: session.start, in this test on the same activation. */
+const reload = ($: Engine) => $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+
+const T0 = Date.parse('2026-09-29T18:00:00')
 
 describe('timing', () => {
   test('compacts 50 minutes after the last turn', async ($, on) => {
@@ -123,6 +146,109 @@ describe('cancelling', () => {
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
     expect(seen.compacts).toEqual([])
+  })
+
+  test('/clear forgets the last turn, so a reload does not re-arm', async ($, on) => {
+    const { clock, seen } = setup(on)
+    await turnDone($)
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    expect(seen.stored).toBe(null)
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+  })
+})
+
+describe('reloading', () => {
+  test('a turn keeps its end time for a reload', async ($, on) => {
+    const { seen } = setup(on)
+    await turnDone($)
+    expect(seen.stored).toEqual({ sessionId: 's1', at: T0 })
+  })
+
+  test('a reload mid-idle compacts at the original deadline', async ($, on) => {
+    const { clock, seen } = setup(on)
+    await turnDone($)
+    await clock.advance(30 * MIN)
+    await reload($)
+    await clock.advance(20 * MIN - 1)
+    expect(seen.compacts).toEqual([])
+    await clock.advance(2)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+    expect(seen.compacts[0]).toContain('at 18:50, after 50 minutes idle')
+    expect(seen.logs).toEqual(['compacted at 18:50 after 50 min idle (200k tokens → 12k summary)'])
+  })
+
+  test('a freshly loaded module re-arms from the stored turn', async ($, on) => {
+    const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
+    await reload($)
+    await clock.advance(20 * MIN - 1)
+    expect(seen.compacts).toEqual([])
+    await clock.advance(2)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+    expect(seen.logs).toEqual(['compacted at 18:20 after 50 min idle (200k tokens → 12k summary)'])
+  })
+
+  test('a reload past the deadline does nothing and says nothing', async ($, on) => {
+    const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 3 * 24 * 60 * MIN } })
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+    expect(seen.logs).toEqual([])
+  })
+
+  test("another session's turn does not arm this one", async ($, on) => {
+    const { clock, seen } = setup(on, { stored: { sessionId: 's0', at: T0 - 30 * MIN } })
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+  })
+
+  test('a reload while a turn runs arms nothing', async ($, on) => {
+    const { clock, seen } = setup(on)
+    await turnDone($)
+    await clock.advance(10 * MIN)
+    await turnStart($)
+    expect(seen.stored).toBe(null)
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+  })
+
+  test('a turn that starts while a reload reads the stored turn wins', async ($, on) => {
+    const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
+    seen.duringRead = () => turnStart($)
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+  })
+
+  test('a reload after the compaction does not compact again', async ($, on) => {
+    const { clock, seen } = setup(on)
+    await turnDone($)
+    await clock.advance(50 * MIN + 1)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts.length).toBe(1)
+  })
+
+  test('a reload after a manual /compact re-arms, and the unknown size leaves it alone', async ($, on) => {
+    const { clock, seen } = setup(on, { tokens: null, stored: { sessionId: 's1', at: T0 - 30 * MIN } })
+    await reload($)
+    await clock.advance(2 * 60 * MIN)
+    await clock.settle()
+    expect(seen.compacts).toEqual([])
+    expect(seen.logs).toEqual([])
   })
 })
 

@@ -9,6 +9,7 @@
   "supportUrl": "https://github.com/davidar/claude-idle-compact/issues",
   "license": "MIT",
   "keywords": ["compact", "prompt-cache", "idle", "mod"],
+  "types": "./types/index.d.ts",
   "userConfig": {
     "idleMinutes": {
       "type": "number",

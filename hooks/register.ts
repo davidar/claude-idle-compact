@@ -8,6 +8,10 @@ const HOUR_MS = 60 * 60_000
 // prompt and tools don't count: compaction leaves them in place, and they are re-cached either way.
 const DEFAULT_MIN_TOKENS = 40_000
 
+// When a session's last main-loop turn ended (declared in types/index.d.ts). Held by the host for the
+// process, so it outlives a reload of this module.
+const LAST_TURN = { plugin: 'idle-compact', key: 'lastTurn' } as const
+
 function nonNegative(raw: unknown): number | undefined {
   if (raw === undefined || raw === '') return undefined
   const n = Number(raw)
@@ -68,6 +72,11 @@ function disarm(state: State) {
   state.timer = undefined
 }
 
+/** A reload while a turn runs, or after the session ended, must not re-arm. */
+function forget($: EngineInterface) {
+  return $.state.set(LAST_TURN, null).catch(() => {})
+}
+
 function clearStatus($: EngineInterface, state: State) {
   if (state.hasStatus) $.ui.status(undefined)
   state.hasStatus = false
@@ -110,17 +119,40 @@ async function compactIfWorthIt($: EngineInterface, state: State, idleSince: num
   }
 }
 
+/** Starts the timer: due `ms` from now, it measures the idle time from `idleSince`. */
+function schedule($: EngineInterface, state: State, idleSince: number, ms: number, delay: number, floor: number) {
+  state.timer = $.clock.after(ms, () => {
+    state.timer = undefined
+    void compactIfWorthIt($, state, idleSince, idleSince + delay + MARGIN_MS, floor)
+  })
+}
+
 async function arm($: EngineInterface, state: State, options: PluginOptions) {
   disarm(state)
   const armed = state.generation
   const delay = idleDelayMs(options)
-  const floor = minTokens(options)
   const idleSince = await $.clock.now()
+  const sessionId = await $.session.id()
   if (armed !== state.generation) return
-  state.timer = $.clock.after(delay, () => {
-    state.timer = undefined
-    void compactIfWorthIt($, state, idleSince, idleSince + delay + MARGIN_MS, floor)
-  })
+  schedule($, state, idleSince, delay, delay, minTokens(options))
+  // Kept for a reload of the module, which cancels the timer. A turn.start that disarms meanwhile
+  // clears it after this write.
+  await $.state.set(LAST_TURN, { sessionId, at: idleSince })
+}
+
+/** After a reload: re-arms for what is left of the delay since this session's last turn, if any. */
+async function rearm($: EngineInterface, state: State, options: PluginOptions) {
+  disarm(state)
+  const armed = state.generation
+  const delay = idleDelayMs(options)
+  const { value: last } = await $.state.get(LAST_TURN)
+  const sessionId = await $.session.id()
+  const now = await $.clock.now()
+  if (armed !== state.generation || !last || last.sessionId !== sessionId) return
+  // Past the deadline the timer has fired already, or the session was resumed long after: either way
+  // there's nothing to do now.
+  const left = last.at + delay - now
+  if (left > 0) schedule($, state, last.at, left, delay, minTokens(options))
 }
 
 /**
@@ -128,14 +160,16 @@ async function arm($: EngineInterface, state: State, options: PluginOptions) {
  * runs from the last model request: the last time the cache was refreshed. A prompt that starts no
  * turn, such as a local slash command, doesn't touch the cache and so doesn't touch the timer.
  * When it fires on time and the context is big enough, compacts while the cache is still warm and
- * leaves a note in the transcript and the status line.
+ * leaves a note in the transcript and the status line. The time of the last turn is kept in
+ * `$.state`, so a reload of the module, which cancels the timer, re-arms it for the time left.
  */
 export const register: Register = (on, options) => {
   const state: State = { generation: 0, hasStatus: false }
 
-  on('turn.start', ($, e, next) => {
+  on('turn.start', async ($, e, next) => {
     disarm(state)
     clearStatus($, state)
+    await forget($)
     return next(e)
   })
 
@@ -148,9 +182,18 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('session.end', ($, e, next) => {
+  on('session.end', async ($, e, next) => {
     disarm(state)
     clearStatus($, state)
+    await forget($)
     return next(e)
+  })
+
+  // Also fires when the module is reloaded (/reload-plugins, an update, an options change), which
+  // cancels the timer: pick up where the last turn left off.
+  on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    await rearm($, state, options).catch(() => {})
+    return result
   })
 }

@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelUsage, PluginOptions, Register, SessionContextUsage, Timer } from 'claude-code'
+import type { EngineInterface, ModelUsage, PluginOptions, Register, SessionCompactResult, SessionContextUsage, Timer } from 'claude-code'
 
 // How long before a 1-hour cache lapses to compact. A 367k-token summary pass took about 2 minutes.
 // Also how late the timer may fire and still compact.
@@ -64,6 +64,8 @@ type State = {
   // Bumped on every disarm, so an arm still awaiting its reads can tell it was overtaken.
   generation: number
   hasStatus: boolean
+  compacting?: boolean
+  result?: SessionCompactResult
 }
 
 function disarm(state: State) {
@@ -103,8 +105,17 @@ async function compactIfWorthIt($: EngineInterface, state: State, idleSince: num
       $.ui.log(`not compacted: the timer fired ${idleMin} min after the last turn, too late for a warm cache`)
       return
     }
-    const result = await $.session.compact({ instructions: instructions(at, idleMin) })
-    if (result.messages === undefined) return
+    // $.session.compact never settles under an SDK host (Paseo, the desktop app): run /compact as
+    // typed instead, and read its result off the session.compact hook below.
+    state.compacting = true
+    state.result = undefined
+    try {
+      await $.command.run({ command: 'compact', args: instructions(at, idleMin) })
+    } finally {
+      state.compacting = false
+    }
+    const result = state.result
+    if (result?.messages === undefined) return
     // tokensBefore is the whole context; tokensAfter is only the summary, without the system prompt and tools.
     const summary = result.tokensAfter === undefined ? '' : ` → ${inThousands(result.tokensAfter)} summary`
     const sizes = `${inThousands(result.tokensBefore ?? before)} tokens${summary}${cacheShare(result.usage)}`
@@ -181,6 +192,12 @@ export const register: Register = (on, options) => {
       // never let arming the timer break the turn
       await arm($, state, options).catch(() => {})
     }
+    return result
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (state.compacting && e.agentId === undefined) state.result = result
     return result
   })
 

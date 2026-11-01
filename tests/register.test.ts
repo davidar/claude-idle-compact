@@ -33,7 +33,7 @@ function breakdown(tokens: number | null, messages: number): SessionContextBreak
 }
 
 /** Answers everything the module reads beneath it, and records what it does. */
-function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : tokens - 20_000, compact = 'ok', usage, stored = null }: Setup = {}) {
+function setup($: Engine, on: On, { tokens = 200_000, messages = tokens === null ? null : tokens - 20_000, compact = 'ok', usage, stored = null }: Setup = {}) {
   const clock = mock.clock(on, { now: T0 })
   // lateMs: how late the timer fires, as after the machine slept. The module reads the usage
   // before the time, so the usage hook is where the clock runs on.
@@ -49,6 +49,11 @@ function setup(on: On, { tokens = 200_000, messages = tokens === null ? null : t
     const context = { tokens: tokens ?? undefined, window: 1_000_000 }
     const withBreakdown = e.breakdown && messages !== null ? { ...context, breakdown: breakdown(tokens, messages) } : context
     return { value: { startedAt: 0, context: withBreakdown, rateLimits: [] } }
+  })
+  on('command.run', async (_$, e) => {
+    if (e.command !== 'compact') return { text: '' }
+    await $.session.compact({ trigger: 'manual', messages: [SUMMARY], instructions: e.args })
+    return { text: 'Compacted' }
   })
   on('session.compact', (_$, e) => {
     if (compact === 'throw') throw new Error('a turn is running')
@@ -91,7 +96,7 @@ const T0 = Date.parse('2026-09-29T18:00:00')
 
 describe('timing', () => {
   test('compacts 50 minutes after the last turn', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(50 * MIN - 1)
     expect(seen.compacts).toEqual([])
@@ -102,7 +107,7 @@ describe('timing', () => {
   })
 
   test('idleMinutes 0 means the default 50 minutes', { options: { idleMinutes: 0 } }, async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -110,7 +115,7 @@ describe('timing', () => {
   })
 
   test('the idleMinutes option overrides the delay', { options: { idleMinutes: 5 } }, async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(5 * MIN - 1)
     expect(seen.compacts).toEqual([])
@@ -120,7 +125,7 @@ describe('timing', () => {
   })
 
   test('an aborted turn arms the timer too', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($, { reason: 'aborted', isAborted: true })
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -128,7 +133,7 @@ describe('timing', () => {
   })
 
   test('a subagent turn does not arm the timer', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($, { agentId: 'a1' })
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
@@ -138,7 +143,7 @@ describe('timing', () => {
 
 describe('cancelling', () => {
   test('a new turn cancels the timer', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(30 * MIN)
     await turnStart($)
@@ -148,7 +153,7 @@ describe('cancelling', () => {
   })
 
   test('/clear cancels the timer', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
     await clock.advance(2 * 60 * MIN)
@@ -157,7 +162,7 @@ describe('cancelling', () => {
   })
 
   test('/clear forgets the last turn, so a reload does not re-arm', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
     expect(seen.stored).toBe(null)
@@ -170,13 +175,13 @@ describe('cancelling', () => {
 
 describe('reloading', () => {
   test('a turn keeps its end time for a reload', async ($, on) => {
-    const { seen } = setup(on)
+    const { seen } = setup($, on)
     await turnDone($)
     expect(seen.stored).toEqual({ sessionId: 's1', at: T0 })
   })
 
   test('a reload mid-idle compacts at the original deadline', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(30 * MIN)
     await reload($)
@@ -190,7 +195,7 @@ describe('reloading', () => {
   })
 
   test('a freshly loaded module re-arms from the stored turn', async ($, on) => {
-    const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
+    const { clock, seen } = setup($, on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
     await reload($)
     await clock.advance(20 * MIN - 1)
     expect(seen.compacts).toEqual([])
@@ -201,7 +206,7 @@ describe('reloading', () => {
   })
 
   test('a reload past the deadline does nothing and says nothing', async ($, on) => {
-    const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 3 * 24 * 60 * MIN } })
+    const { clock, seen } = setup($, on, { stored: { sessionId: 's1', at: T0 - 3 * 24 * 60 * MIN } })
     await reload($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
@@ -210,7 +215,7 @@ describe('reloading', () => {
   })
 
   test("another session's turn does not arm this one", async ($, on) => {
-    const { clock, seen } = setup(on, { stored: { sessionId: 's0', at: T0 - 30 * MIN } })
+    const { clock, seen } = setup($, on, { stored: { sessionId: 's0', at: T0 - 30 * MIN } })
     await reload($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
@@ -218,7 +223,7 @@ describe('reloading', () => {
   })
 
   test('a reload while a turn runs arms nothing', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(10 * MIN)
     await turnStart($)
@@ -230,7 +235,7 @@ describe('reloading', () => {
   })
 
   test('a turn that starts while a reload reads the stored turn wins', async ($, on) => {
-    const { clock, seen } = setup(on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
+    const { clock, seen } = setup($, on, { stored: { sessionId: 's1', at: T0 - 30 * MIN } })
     seen.duringRead = () => turnStart($)
     await reload($)
     await clock.advance(2 * 60 * MIN)
@@ -239,7 +244,7 @@ describe('reloading', () => {
   })
 
   test('a turn that starts while the end time is being stored leaves nothing for a reload', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     seen.duringWrite = () => turnStart($)
     await turnDone($)
     expect(seen.stored).toBe(null)
@@ -250,13 +255,13 @@ describe('reloading', () => {
   })
 
   test("a reloaded module clears the status line its predecessor pinned", async ($, on) => {
-    const { seen } = setup(on)
+    const { seen } = setup($, on)
     await turnStart($)
     expect(seen.status).toEqual([undefined])
   })
 
   test('a reload after the compaction does not compact again', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -268,7 +273,7 @@ describe('reloading', () => {
   })
 
   test('a reload after a manual /compact re-arms, and the unknown size leaves it alone', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: null, stored: { sessionId: 's1', at: T0 - 30 * MIN } })
+    const { clock, seen } = setup($, on, { tokens: null, stored: { sessionId: 's1', at: T0 - 30 * MIN } })
     await reload($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
@@ -279,7 +284,7 @@ describe('reloading', () => {
 
 describe('when it fires', () => {
   test('small conversations are left alone, however big the system prompt and tools', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 120_000, messages: 39_000 })
+    const { clock, seen } = setup($, on, { tokens: 120_000, messages: 39_000 })
     await turnDone($)
     await clock.advance(2 * 60 * MIN)
     await clock.settle()
@@ -287,7 +292,7 @@ describe('when it fires', () => {
   })
 
   test('a conversation under the floor says why it was left alone', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 32_000, messages: 12_000 })
+    const { clock, seen } = setup($, on, { tokens: 32_000, messages: 12_000 })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -296,7 +301,7 @@ describe('when it fires', () => {
   })
 
   test('a small floor reads as it is', { options: { minTokens: 100 } }, async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 20_050, messages: 50 })
+    const { clock, seen } = setup($, on, { tokens: 20_050, messages: 50 })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -304,7 +309,7 @@ describe('when it fires', () => {
   })
 
   test('the floor is on the conversation', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 61_000, messages: 41_000 })
+    const { clock, seen } = setup($, on, { tokens: 61_000, messages: 41_000 })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -312,7 +317,7 @@ describe('when it fires', () => {
   })
 
   test('the minTokens option sets the floor', { options: { minTokens: 10_000 } }, async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 30_000, messages: 11_000 })
+    const { clock, seen } = setup($, on, { tokens: 30_000, messages: 11_000 })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -320,7 +325,7 @@ describe('when it fires', () => {
   })
 
   test('without a breakdown, the whole context counts', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: 200_000, messages: null })
+    const { clock, seen } = setup($, on, { tokens: 200_000, messages: null })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -328,7 +333,7 @@ describe('when it fires', () => {
   })
 
   test('leaves a transcript line and a status line, cleared by the next turn', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -341,7 +346,7 @@ describe('when it fires', () => {
 
   test('the line says how much of the summary request came from the cache', async ($, on) => {
     const usage = { input_tokens: 1_500, output_tokens: 800, cache_read_input_tokens: 198_000, cache_creation_input_tokens: 500 }
-    const { clock, seen } = setup(on, { usage })
+    const { clock, seen } = setup($, on, { usage })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -349,7 +354,7 @@ describe('when it fires', () => {
   })
 
   test('a timer that fires late, after the machine slept, does not compact and says why', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     seen.lateMs = 8 * 60 * MIN
     await clock.advance(50 * MIN + 1)
@@ -360,7 +365,7 @@ describe('when it fires', () => {
   })
 
   test('a timer a few minutes late still compacts', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     seen.lateMs = 9 * MIN
     await clock.advance(50 * MIN + 1)
@@ -369,7 +374,7 @@ describe('when it fires', () => {
   })
 
   test('an unknown context size, as after a manual /compact, is left alone without a word', async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: null })
+    const { clock, seen } = setup($, on, { tokens: null })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -378,7 +383,7 @@ describe('when it fires', () => {
   })
 
   test('an unknown context size is left alone even with no floor', { options: { minTokens: 0 } }, async ($, on) => {
-    const { clock, seen } = setup(on, { tokens: null })
+    const { clock, seen } = setup($, on, { tokens: null })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -386,7 +391,7 @@ describe('when it fires', () => {
   })
 
   test('compacts only once if nobody comes back', async ($, on) => {
-    const { clock, seen } = setup(on)
+    const { clock, seen } = setup($, on)
     await turnDone($)
     await clock.advance(10 * 60 * MIN)
     await clock.settle()
@@ -394,7 +399,7 @@ describe('when it fires', () => {
   })
 
   test('a skipped compaction says nothing', async ($, on) => {
-    const { clock, seen } = setup(on, { compact: 'skip' })
+    const { clock, seen } = setup($, on, { compact: 'skip' })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
@@ -404,7 +409,7 @@ describe('when it fires', () => {
   })
 
   test('a rejected compaction is swallowed and the next turn re-arms', async ($, on) => {
-    const { clock, seen } = setup(on, { compact: 'throw' })
+    const { clock, seen } = setup($, on, { compact: 'throw' })
     await turnDone($)
     await clock.advance(50 * MIN + 1)
     await clock.settle()
